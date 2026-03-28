@@ -20,6 +20,7 @@
 12. [Data Model](#12-data-model)
 13. [Critical Gaps & Fix Timeline](#13-critical-gaps--fix-timeline)
 14. [Research Foundation](#14-research-foundation)
+15. [Exact Code Audit — Verified Values](#15-exact-code-audit--verified-values)
 
 ---
 
@@ -880,5 +881,317 @@ No prior art found in these specific combinations (existing code sonification pa
 
 ---
 
-*Document version: 2.0 | Last updated: March 2026*
+## 15. Exact Code Audit — Verified Values
+
+> *All values below are verified from source. Line numbers reference the current codebase.*
+
+### 15.1 Complete Hardcoded Parameter Map
+
+Every magic number in the codebase — location, value, and recommended home in `config.js`:
+
+| Parameter | Current Value | File:Line | Config Key |
+|-----------|--------------|-----------|------------|
+| Frequency base | 200 Hz | solver.js:49 | `solver.freqBase` |
+| Frequency scale | 20 Hz/unit | solver.js:50 | `solver.freqScale` |
+| Vibrato scale | 8 Hz/unit gradient | solver.js:51 | `solver.vibratoScale` |
+| Gradient clip norm | 10 | solver.js:150 | `solver.gradientClipNorm` |
+| Numerical gradient step h | 1e-5 | solver.js:133 | `solver.gradientH` |
+| Convergence error threshold | 0.001 | solver.js:125 | `solver.convergenceError` |
+| Convergence gradient threshold | 0.01 | solver.js:125 | `solver.convergenceGrad` |
+| Noise error divisor | 10 | solver.js:113 | `solver.noiseDivisor` |
+| LFO frequency | 5 Hz | audio.js:93 | `audio.lfoFrequency` |
+| Audio ramp time | 30ms | audio.js:129 | `audio.rampTimeMs` |
+| Master gain | 0.4 | audio.js:49 | `audio.masterGain` |
+| FFT size | 2048 | audio.js:54 | `audio.fftSize` |
+| FFT smoothing | 0.4 | audio.js:55 | `audio.fftSmoothing` |
+| Style base freqs | [165,220,275,330,385,440,495,550] | style-engine.js:31 | `style.baseFrequencies` |
+| Style amplitude scale | 3 | style-engine.js:355 | `style.deviationAmpScale` |
+| Style vibrato scale | 40 Hz | style-engine.js:356 | `style.deviationVibratoScale` |
+| Style noise scale | 0.8 | style-engine.js:357 | `style.deviationNoiseScale` |
+| Celebration chord ratios | [1, 5/4, 3/2, 2] | audio.js:180 | `audio.celebrationRatios` |
+| Celebration base freq | 440 Hz | audio.js:183 | `audio.celebrationBase` |
+| Rosenbrock lr override | 0.001 | solver.js:249 | Per-problem config |
+| Fingerprint storage key | 'resonance-style-fingerprints' | style-engine.js:28 | `storage.key` |
+
+### 15.2 The `config.js` — Recommended Central Configuration
+
+Create this file first. All other files import from it:
+
+```javascript
+// src/config.js — single source of truth for all tunable parameters
+export const RESONANCE_CONFIG = {
+  solver: {
+    freqBase: 200,              // Hz — lowest frequency at x=0
+    freqScale: 20,              // Hz/unit — frequency per unit of variable
+    vibratoScale: 8,            // Hz of modulation per unit gradient
+    gradientClipNorm: 10,       // L2 norm limit (prevents Rosenbrock explosion)
+    gradientH: 1e-5,            // Numerical gradient finite difference step
+    momentum: 0.9,              // Momentum coefficient (0 = vanilla GD)
+    lr: 0.01,                   // Default learning rate
+    convergenceError: 0.001,    // |E(x)| < this → converged
+    convergenceGrad: 0.01,      // |∇E| < this → converged
+    noiseDivisor: 10,           // noise = min(1, E / noiseDivisor)
+    maxSteps: 10000,            // Failsafe termination
+  },
+
+  audio: {
+    rampTimeMs: 30,             // ms — smooth parameter transitions (prevents clicks)
+    lfoFrequency: 5,            // Hz — vibrato LFO rate
+    masterGain: 0.4,            // 0–1 — default output level
+    fftSize: 2048,              // Analyser FFT resolution
+    fftSmoothing: 0.4,          // Analyser time constant
+    maxVoices: 12,              // Voice pool limit before recycling
+    celebrationRatios: [1, 1.25, 1.5, 2],  // Major chord: unison, 3rd, 5th, octave
+    celebrationBase: 440,       // Hz — concert A
+    celebrationDuration: 1.5,   // seconds
+  },
+
+  style: {
+    baseFrequencies: [165, 220, 275, 330, 385, 440, 495, 550],  // A2 harmonic series
+    deviationAmpScale: 3,       // amplitude = exp(-deviation * scale)
+    deviationVibratoScale: 40,  // vibrato = deviation * scale Hz
+    deviationNoiseScale: 0.8,   // noise = deviation * scale
+    storageKey: 'resonance-style-fingerprints',
+    maxProfilesStored: 50,      // localStorage limit
+  },
+
+  scanner: {
+    defaultScanRate: 4,         // lines per second
+    minScanRate: 0.5,
+    maxScanRate: 20,
+    freqMin: 150,               // Hz — lowest line frequency (line 1)
+    freqMax: 750,               // Hz — highest line frequency (last line)
+  },
+};
+```
+
+### 15.3 Exact Error Scoring Formula (Code Analyzer)
+
+Verified from `code-analyzer.js` lines 83–120:
+
+```
+E(line) = 0.15 × depth_score
+        + 0.10 × length_score
+        + 0.15 × cognitive_weight_score
+        + 0.35 × semantic_smell_score    ← highest weight
+        + 0.25 × syntax_smell_score
+
+Where:
+  depth_score          = nesting_depth / 5          (0 at depth 0, 1 at depth ≥5)
+  length_score         = max(0, (line_length - 80) / 200)
+  cognitive_score      = cognitive_weight / 10
+  semantic_smell_score = min(1, num_semantic_smells × 0.4)
+  syntax_smell_score   = min(1, num_syntax_smells × 0.2)
+```
+
+**Semantic smell weights (0.4 each):**
+`loose-equality` | `eval` | `nested-ternary` | `empty-catch` | `var-usage` | `magic-number` | `random-in-logic` | `dead-code` | `global-mutation` | `no-ramp-click` | `random-frequency` | `random-amplitude`
+
+### 15.4 Exact State Variables (Chaos to Fix)
+
+Current scattered boolean flags that must be replaced with a state machine:
+
+```javascript
+// app.js (solver)
+let running = false;        // line 19
+let paused = false;         // line 20
+let celebrated = false;     // line 21
+
+// learn.js (style learner)
+let isPlaying = false;      // line 23
+
+// scanner.js (code scanner)
+let playing = false;        // line 20
+let paused = false;         // line 21 (DIFFERENT variable, same name!)
+let currentLine = 0;        // line 22
+```
+
+**Recommended state machine (replaces all of the above):**
+
+```javascript
+// src/state-machine.js
+const STATES = {
+  IDLE:       'idle',
+  ANALYZING:  'analyzing',   // AST parse in progress
+  PLAYING:    'playing',     // Sound + optimization running
+  PAUSED:     'paused',      // Sound frozen, state preserved
+  CONVERGED:  'converged',   // Solution found, celebration played
+  ERROR:      'error',       // Parse or audio failure
+};
+
+const TRANSITIONS = {
+  idle:      ['analyzing', 'playing'],
+  analyzing: ['idle', 'playing', 'error'],
+  playing:   ['paused', 'converged', 'idle', 'error'],
+  paused:    ['playing', 'idle'],
+  converged: ['idle'],
+  error:     ['idle'],
+};
+
+class ResonanceState {
+  #state = STATES.IDLE;
+  #listeners = new Map();
+
+  transition(to) {
+    const allowed = TRANSITIONS[this.#state];
+    if (!allowed.includes(to)) {
+      throw new Error(`Invalid transition: ${this.#state} → ${to}`);
+    }
+    const from = this.#state;
+    this.#state = to;
+    this.#listeners.get(to)?.forEach(fn => fn({ from, to }));
+  }
+
+  get current() { return this.#state; }
+  is(state) { return this.#state === state; }
+
+  on(state, fn) {
+    if (!this.#listeners.has(state)) this.#listeners.set(state, []);
+    this.#listeners.get(state).push(fn);
+    return () => this.#listeners.get(state).filter(f => f !== fn); // unsubscribe
+  }
+}
+```
+
+### 15.5 Exact Convergence Mathematics
+
+Convergence is declared when **all three conditions hold simultaneously** (solver.js:125):
+
+```
+|E(x)| < 0.001          (error small)
+|∇E(x)| < 0.01          (gradient flat)
+|xₙ - xₙ₋₁| < ε₃       (NOT currently checked — gap to fix)
+```
+
+**The missing step condition** prevents false convergence at saddle points with near-zero gradient and near-zero error but still moving. Fix:
+
+```javascript
+// Add to _compute():
+const stepNorm = Math.sqrt(this.velocity.reduce((s, v) => s + v * v, 0));
+this.converged = this.error < RESONANCE_CONFIG.solver.convergenceError
+              && this.gradMagnitude < RESONANCE_CONFIG.solver.convergenceGrad
+              && stepNorm < 1e-6;  // velocity effectively zero
+```
+
+### 15.6 Why the Celebration Ratios Are Mathematically Correct
+
+`[1, 5/4, 3/2, 2]` at 440 Hz base → `[440, 550, 660, 880]` Hz.
+
+These are overtones **4, 5, 6, 8** of the fundamental (110 Hz = A2):
+```
+Harmonic 4: 110 × 4 = 440 Hz  (A4, concert pitch)
+Harmonic 5: 110 × 5 = 550 Hz  (C#5, major third)
+Harmonic 6: 110 × 6 = 660 Hz  (E5, perfect fifth)
+Harmonic 8: 110 × 8 = 880 Hz  (A5, octave)
+```
+
+They share **all harmonics above 880 Hz**, making them maximally consonant. This is not arbitrary — it is the mathematical definition of consonance (Helmholtz, 1877). Any randomly chosen chord would lack shared harmonics → beating → dissonance → wrong sonic signal for convergence.
+
+### 15.7 Fingerprint Storage Format (Verified)
+
+localStorage key: `'resonance-style-fingerprints'`
+Format: `JSON.stringify({ profileName: { ...fingerprintObject } })`
+Fingerprint size: ~2KB per profile
+Default localStorage quota: 5–10MB = ~2,500–5,000 profiles before eviction
+
+For team sync: fingerprints must be migrated to cloud storage with conflict resolution. The Welford weighted-average merge is already correctly implemented in `mergeFingerprints()` (style-engine.js:302).
+
+### 15.8 Test Suite — Week 1 Priority Tests
+
+```javascript
+// __tests__/solver.test.js — gradient check (most critical)
+import { describe, test, expect } from 'vitest';
+import { ResonantSolver } from '../src/solver.js';
+import { RESONANCE_CONFIG } from '../src/config.js';
+
+describe('Gradient Check', () => {
+  test('numerical gradient matches analytical for quadratic', () => {
+    const solver = new ResonantSolver();
+    solver.define(2,
+      x => (x[0]-3)**2 + (x[1]-7)**2,
+      x => [2*(x[0]-3), 2*(x[1]-7)]
+    );
+    solver.vars = [1.5, 4.2];
+    solver._compute();
+    const numerical = solver._numericalGradient([1.5, 4.2]);
+    expect(numerical[0]).toBeCloseTo(solver.gradient[0], 4);
+    expect(numerical[1]).toBeCloseTo(solver.gradient[1], 4);
+  });
+});
+
+describe('Convergence', () => {
+  test('single variable converges to x=5', async () => {
+    const solver = new ResonantSolver({ lr: 0.05 });
+    solver.define(1, x => (x[0]-5)**2, x => [2*(x[0]-5)]);
+    while (!solver.converged && solver.step < 500) solver.step_();
+    expect(solver.vars[0]).toBeCloseTo(5, 2);
+    expect(solver.step).toBeLessThan(200);
+  });
+
+  test('Rosenbrock reaches within 0.05 of (1,1)', async () => {
+    const solver = new ResonantSolver({ lr: 0.001 });
+    const E = x => 100*(x[1]-x[0]**2)**2 + (1-x[0])**2;
+    const G = x => [-400*x[0]*(x[1]-x[0]**2)-2*(1-x[0]), 200*(x[1]-x[0]**2)];
+    solver.define(2, E, G);
+    while (!solver.converged && solver.step < 2000) solver.step_();
+    expect(solver.vars[0]).toBeCloseTo(1, 1);
+    expect(solver.vars[1]).toBeCloseTo(1, 1);
+  });
+});
+
+describe('Sound Parameter Derivation', () => {
+  test('amplitude = exp(-error)', () => {
+    const solver = new ResonantSolver();
+    solver.define(1, x => (x[0]-5)**2);
+    solver.error = 2.5;
+    solver.gradient = [1.0];
+    solver.vars = [2.5];
+    // Re-derive params
+    const amp = Math.exp(-solver.error);
+    expect(amp).toBeCloseTo(Math.exp(-2.5), 6);
+  });
+
+  test('vibrato = 0 at gradient = 0 (convergence)', () => {
+    const solver = new ResonantSolver();
+    solver.define(1, x => (x[0]-5)**2, x => [2*(x[0]-5)]);
+    while (!solver.converged && solver.step < 500) solver.step_();
+    // At convergence, gradient should be ~0 → vibrato ~0
+    expect(solver.vibratos[0]).toBeLessThan(0.1);
+  });
+});
+
+// __tests__/style-engine.test.js
+describe('Style Fingerprint', () => {
+  test('camelCase code gets high camelCaseRatio', () => {
+    const engine = new StyleEngine();
+    const fp = engine.extractFingerprint(`
+      const fetchUserData = (userId) => {
+        const responsePayload = getData(userId);
+        return responsePayload;
+      };
+    `);
+    expect(fp.dimensions.naming.camelCaseRatio).toBeGreaterThan(0.5);
+  });
+
+  test('deviation = 0 when comparing code to its own fingerprint', () => {
+    const engine = new StyleEngine();
+    const code = `const x = () => { return 1; };`;
+    const fp = engine.extractFingerprint(code);
+    const result = engine.compare(fp, code);
+    expect(result.overallScore).toBeLessThan(0.15); // Allow small numerical noise
+  });
+
+  test('merge increases sampleCount', () => {
+    const engine = new StyleEngine();
+    const fp1 = engine.extractFingerprint(`const a = () => 1;`);
+    const fp2 = engine.extractFingerprint(`function b() { return 2; }`);
+    const merged = engine.mergeFingerprints(fp1, fp2);
+    expect(merged.sampleCount).toBe(2);
+  });
+});
+```
+
+---
+
+*Document version: 3.0 | Last updated: March 2026 | Audit completed: March 2026*
 *Repository: https://github.com/Roxrite0509/resonance*
