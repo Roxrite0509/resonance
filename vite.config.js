@@ -7,6 +7,7 @@ export default defineConfig({
       input: {
         main: 'index.html',
         scanner: 'scanner.html',
+        learn: 'learn.html',
       },
     },
   },
